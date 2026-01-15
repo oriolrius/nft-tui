@@ -72,11 +72,20 @@ TabbedContent {
 
 TabPane {
     padding: 0;
+    height: 100%;
+}
+
+ContentSwitcher {
+    height: 100%;
 }
 
 /* Data Tables */
-DataTable {
+RuleTable, SetElementTable {
     height: 100%;
+    scrollbar-gutter: stable;
+}
+
+DataTable {
     scrollbar-gutter: stable;
 }
 

@@ -98,7 +98,11 @@ class MainScreen(Screen):
 
     @work(exclusive=True)
     async def load_ruleset(self) -> None:
-        """Load the nftables ruleset."""
+        """Load the nftables ruleset (spawns a worker)."""
+        await self._do_load_ruleset()
+
+    async def _do_load_ruleset(self, silent: bool = False) -> None:
+        """Internal method to load the ruleset."""
         try:
             self._ruleset = await self._client.list_ruleset_async()
 
@@ -109,15 +113,54 @@ class MainScreen(Screen):
             counter = self.query_one("#counter-display", CounterDisplay)
             counter.update_from_ruleset(self._ruleset)
 
-            self.notify(
-                f"Loaded {len(self._ruleset.tables)} tables, "
-                f"{self._ruleset.total_chains()} chains, "
-                f"{self._ruleset.total_rules()} rules",
-                severity="information",
-            )
+            # Refresh current view if a chain/table is selected
+            self._refresh_current_view()
+
+            if not silent:
+                self.notify(
+                    f"Loaded {len(self._ruleset.tables)} tables, "
+                    f"{self._ruleset.total_chains()} chains, "
+                    f"{self._ruleset.total_rules()} rules",
+                    severity="information",
+                )
 
         except NFTError as e:
             self.notify(f"Failed to load ruleset: {e}", severity="error")
+
+    def _refresh_current_view(self) -> None:
+        """Refresh the current view (rule table or set table) after reload."""
+        if not self._ruleset:
+            return
+
+        # If a chain is selected, refresh the rules table
+        if self._selected_chain and self._selected_table:
+            # Find the updated chain in the new ruleset
+            updated_chain = self._ruleset.get_chain(
+                self._selected_chain.family,
+                self._selected_chain.table,
+                self._selected_chain.name,
+            )
+            if updated_chain:
+                # Find the updated table too
+                updated_table = self._ruleset.get_table(
+                    self._selected_table.family,
+                    self._selected_table.name,
+                )
+                if updated_table:
+                    self._selected_chain = updated_chain
+                    self._selected_table = updated_table
+
+                    # Reload the rules table
+                    rule_table = self.query_one("#rule-table", RuleTable)
+                    rule_table.load_chain(updated_chain, updated_table)
+
+                    # Update chain info panel
+                    chain_info = self.query_one("#chain-info", ChainInfoPanel)
+                    chain_info.set_chain(updated_chain)
+
+                    # Update counter display for chain
+                    counter = self.query_one("#counter-display", CounterDisplay)
+                    counter.update_from_chain(updated_chain)
 
     @on(RulesetTree.TableSelected)
     def on_table_selected(self, event: RulesetTree.TableSelected) -> None:
@@ -153,6 +196,10 @@ class MainScreen(Screen):
         chain_info.set_chain(event.chain)
         chain_info.remove_class("hidden")
 
+        # Switch to rules tab FIRST
+        tabs = self.query_one("#detail-tabs", TabbedContent)
+        tabs.active = "rules-tab"
+
         # Load rules into table
         rule_table = self.query_one("#rule-table", RuleTable)
         rule_table.load_chain(event.chain, event.table)
@@ -160,10 +207,6 @@ class MainScreen(Screen):
         # Update counter display
         counter = self.query_one("#counter-display", CounterDisplay)
         counter.update_from_chain(event.chain)
-
-        # Switch to rules tab
-        tabs = self.query_one("#detail-tabs", TabbedContent)
-        tabs.active = "rules-tab"
 
     @on(RulesetTree.SetSelected)
     def on_set_selected(self, event: RulesetTree.SetSelected) -> None:
@@ -200,6 +243,7 @@ class MainScreen(Screen):
 
         self.app.push_screen(ConntrackScreen())
 
+    @work
     async def action_add(self) -> None:
         """Add a new item based on context."""
         tree = self.query_one("#ruleset-tree", RulesetTree)
@@ -231,18 +275,16 @@ class MainScreen(Screen):
                 family, name = result
                 await self._add_table(family, name)
 
-    @work
     async def _add_table(self, family: str, name: str) -> None:
         """Add a new table."""
         try:
             await self._backup.create_auto_backup_async(self._client)
             await self._client.add_table_async(family, name)
             self.notify(f"Table {family}::{name} created", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to create table: {e}", severity="error")
 
-    @work
     async def _add_chain(self, chain_data: dict) -> None:
         """Add a new chain."""
         try:
@@ -260,11 +302,10 @@ class MainScreen(Screen):
                 f"Chain {chain_data['name']} created",
                 severity="information",
             )
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to create chain: {e}", severity="error")
 
-    @work
     async def _add_rule(self, rule_spec: str) -> None:
         """Add a new rule."""
         if not self._selected_chain:
@@ -279,10 +320,11 @@ class MainScreen(Screen):
                 rule_spec,
             )
             self.notify("Rule added", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to add rule: {e}", severity="error")
 
+    @work
     async def action_delete(self) -> None:
         """Delete the selected item."""
         rule_table = self.query_one("#rule-table", RuleTable)
@@ -327,7 +369,6 @@ class MainScreen(Screen):
             if confirmed:
                 await self._delete_table()
 
-    @work
     async def _delete_rule(self, handle: int) -> None:
         """Delete a rule by handle."""
         if not self._selected_chain:
@@ -342,11 +383,10 @@ class MainScreen(Screen):
                 handle,
             )
             self.notify("Rule deleted", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to delete rule: {e}", severity="error")
 
-    @work
     async def _delete_chain(self) -> None:
         """Delete the selected chain."""
         if not self._selected_chain:
@@ -361,11 +401,10 @@ class MainScreen(Screen):
             )
             self.notify("Chain deleted", severity="information")
             self._selected_chain = None
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to delete chain: {e}", severity="error")
 
-    @work
     async def _delete_table(self) -> None:
         """Delete the selected table."""
         if not self._selected_table:
@@ -379,10 +418,11 @@ class MainScreen(Screen):
             )
             self.notify("Table deleted", severity="information")
             self._selected_table = None
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to delete table: {e}", severity="error")
 
+    @work
     async def action_flush(self) -> None:
         """Flush rules from chain or table."""
         if self._selected_chain:
@@ -409,7 +449,6 @@ class MainScreen(Screen):
             if confirmed:
                 await self._flush_table()
 
-    @work
     async def _flush_chain(self) -> None:
         """Flush the selected chain."""
         if not self._selected_chain:
@@ -423,11 +462,10 @@ class MainScreen(Screen):
                 self._selected_chain.name,
             )
             self.notify("Chain flushed", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to flush chain: {e}", severity="error")
 
-    @work
     async def _flush_table(self) -> None:
         """Flush the selected table."""
         if not self._selected_table:
@@ -440,34 +478,34 @@ class MainScreen(Screen):
                 self._selected_table.name,
             )
             self.notify("Table flushed", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to flush table: {e}", severity="error")
 
+    @work
     async def action_import_file(self) -> None:
         """Import a ruleset file."""
         path = await self.app.push_screen_wait(ImportDialog())
         if path:
             await self._import_file(path)
 
-    @work
     async def _import_file(self, path: Path) -> None:
         """Import a ruleset file."""
         try:
             await self._backup.create_auto_backup_async(self._client)
             await self._client.import_file_async(path)
             self.notify(f"Imported {path.name}", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to import: {e}", severity="error")
 
+    @work
     async def action_export_file(self) -> None:
         """Export the ruleset to a file."""
         path = await self.app.push_screen_wait(ExportDialog())
         if path:
             await self._export_file(path)
 
-    @work
     async def _export_file(self, path: Path) -> None:
         """Export the ruleset to a file."""
         try:
@@ -477,6 +515,7 @@ class MainScreen(Screen):
         except Exception as e:
             self.notify(f"Failed to export: {e}", severity="error")
 
+    @work
     async def action_undo(self) -> None:
         """Restore from the last backup."""
         backups = self._backup.list_backups()
@@ -496,16 +535,16 @@ class MainScreen(Screen):
         if confirmed:
             await self._restore_backup(latest[0])
 
-    @work
     async def _restore_backup(self, path: Path) -> None:
         """Restore from a backup."""
         try:
             await self._backup.restore_backup_async(self._client, path)
             self.notify("Backup restored", severity="information")
-            self.load_ruleset()
+            await self._do_load_ruleset(silent=True)
         except Exception as e:
             self.notify(f"Failed to restore: {e}", severity="error")
 
+    @work
     async def action_search(self) -> None:
         """Open search dialog."""
         term = await self.app.push_screen_wait(SearchDialog())

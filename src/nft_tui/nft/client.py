@@ -145,12 +145,12 @@ class NFTClient:
 
     def list_ruleset(self) -> RuleSet:
         """Get the complete ruleset."""
-        output = self._run(["-j", "list", "ruleset"])
+        output = self._run(["-j", "-a", "list", "ruleset"])
         return self.parser.parse_ruleset(output)
 
     async def list_ruleset_async(self) -> RuleSet:
         """Get the complete ruleset asynchronously."""
-        output = await self._run_async(["-j", "list", "ruleset"])
+        output = await self._run_async(["-j", "-a", "list", "ruleset"])
         return self.parser.parse_ruleset(output)
 
     def list_tables(self) -> list[Table]:

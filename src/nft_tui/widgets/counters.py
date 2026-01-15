@@ -32,10 +32,6 @@ class CounterCard(Static):
         self._value = value
         self._subtitle = subtitle
 
-    def compose(self) -> None:
-        """Compose the card content."""
-        pass
-
     def render(self) -> Text:
         """Render the counter card."""
         text = Text()
