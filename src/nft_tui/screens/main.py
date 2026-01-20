@@ -16,10 +16,13 @@ from ..utils.backup import BackupManager
 from ..widgets.counters import ChainInfoPanel, CounterDisplay, TableInfoPanel
 from ..widgets.dialogs import (
     AddChainDialog,
+    AddChoiceDialog,
     AddRuleDialog,
     AddSetDialog,
     AddTableDialog,
     ConfirmDialog,
+    EditChainDialog,
+    EditRuleDialog,
     ExportDialog,
     ImportDialog,
     SearchDialog,
@@ -245,11 +248,39 @@ class MainScreen(Screen):
 
     @work
     async def action_add(self) -> None:
-        """Add a new item based on context."""
-        tree = self.query_one("#ruleset-tree", RulesetTree)
+        """Add a new item - show choice dialog."""
+        # Determine context for the choice dialog
+        table_name = self._selected_table.full_name if self._selected_table else None
+        chain_name = self._selected_chain.name if self._selected_chain else None
+        can_add_chain = self._selected_table is not None
+        can_add_rule = self._selected_chain is not None
+        can_add_set = self._selected_table is not None
 
-        if self._selected_chain:
-            # Add rule to chain
+        # Show choice dialog
+        choice = await self.app.push_screen_wait(
+            AddChoiceDialog(
+                can_add_chain=can_add_chain,
+                can_add_rule=can_add_rule,
+                can_add_set=can_add_set,
+                table_name=table_name,
+                chain_name=chain_name,
+            )
+        )
+
+        if choice == "table":
+            result = await self.app.push_screen_wait(AddTableDialog())
+            if result:
+                family, name = result
+                await self._add_table(family, name)
+
+        elif choice == "chain" and self._selected_table:
+            result = await self.app.push_screen_wait(
+                AddChainDialog(self._selected_table.family, self._selected_table.name)
+            )
+            if result:
+                await self._add_chain(result)
+
+        elif choice == "rule" and self._selected_chain:
             result = await self.app.push_screen_wait(
                 AddRuleDialog(
                     self._selected_chain.family,
@@ -260,20 +291,12 @@ class MainScreen(Screen):
             if result:
                 await self._add_rule(result)
 
-        elif self._selected_table:
-            # Add chain to table
+        elif choice == "set" and self._selected_table:
             result = await self.app.push_screen_wait(
-                AddChainDialog(self._selected_table.family, self._selected_table.name)
+                AddSetDialog(self._selected_table.family, self._selected_table.name)
             )
             if result:
-                await self._add_chain(result)
-
-        else:
-            # Add new table
-            result = await self.app.push_screen_wait(AddTableDialog())
-            if result:
-                family, name = result
-                await self._add_table(family, name)
+                await self._add_set(result)
 
     async def _add_table(self, family: str, name: str) -> None:
         """Add a new table."""
@@ -323,6 +346,23 @@ class MainScreen(Screen):
             await self._do_load_ruleset(silent=True)
         except NFTError as e:
             self.notify(f"Failed to add rule: {e}", severity="error")
+
+    async def _add_set(self, set_data: dict) -> None:
+        """Add a new set."""
+        try:
+            await self._backup.create_auto_backup_async(self._client)
+            await self._client.add_set_async(
+                set_data["family"],
+                set_data["table"],
+                set_data["name"],
+                set_data["type"],
+                timeout=set_data.get("timeout"),
+                comment=set_data.get("comment"),
+            )
+            self.notify(f"Set {set_data['name']} created", severity="information")
+            await self._do_load_ruleset(silent=True)
+        except NFTError as e:
+            self.notify(f"Failed to create set: {e}", severity="error")
 
     @work
     async def action_delete(self) -> None:
@@ -587,6 +627,82 @@ class MainScreen(Screen):
         """Open the command palette."""
         self.app.action_command_palette()
 
-    def action_edit(self) -> None:
+    @work
+    async def action_edit(self) -> None:
         """Edit the selected item."""
-        self.notify("Edit not yet implemented", severity="warning")
+        rule_table = self.query_one("#rule-table", RuleTable)
+        selected_rule = rule_table.get_selected_rule()
+
+        if selected_rule and self._selected_chain and self._selected_table:
+            # Edit rule
+            result = await self.app.push_screen_wait(
+                EditRuleDialog(
+                    self._selected_chain.family,
+                    self._selected_chain.table,
+                    self._selected_chain.name,
+                    selected_rule.handle,
+                    selected_rule.format_expr(),
+                )
+            )
+            if result:
+                await self._edit_rule(selected_rule.handle, result)
+
+        elif self._selected_chain and self._selected_table:
+            # Edit chain policy
+            is_base_chain = self._selected_chain.type is not None
+            result = await self.app.push_screen_wait(
+                EditChainDialog(
+                    self._selected_chain.family,
+                    self._selected_chain.table,
+                    self._selected_chain.name,
+                    self._selected_chain.policy,
+                    is_base_chain,
+                )
+            )
+            if result:
+                await self._edit_chain_policy(result)
+
+        elif self._selected_table:
+            self.notify(
+                "Tables cannot be edited. Delete and recreate to change.",
+                severity="warning",
+            )
+        else:
+            self.notify("Select an item to edit", severity="warning")
+
+    async def _edit_rule(self, handle: int, new_rule_spec: str) -> None:
+        """Replace a rule with a new specification."""
+        if not self._selected_chain:
+            return
+
+        try:
+            await self._backup.create_auto_backup_async(self._client)
+            await self._client.replace_rule_async(
+                self._selected_chain.family,
+                self._selected_chain.table,
+                self._selected_chain.name,
+                handle,
+                new_rule_spec,
+            )
+            self.notify("Rule updated", severity="information")
+            await self._do_load_ruleset(silent=True)
+        except NFTError as e:
+            self.notify(f"Failed to update rule: {e}", severity="error")
+
+    async def _edit_chain_policy(self, chain_data: dict) -> None:
+        """Update the chain policy."""
+        try:
+            await self._backup.create_auto_backup_async(self._client)
+            await self._client.set_chain_policy_async(
+                chain_data["family"],
+                chain_data["table"],
+                chain_data["chain"],
+                chain_data["policy"],
+            )
+            self.notify(
+                f"Chain policy set to {chain_data['policy']}",
+                severity="information",
+            )
+            await self._do_load_ruleset(silent=True)
+        except NFTError as e:
+            self.notify(f"Failed to update chain policy: {e}", severity="error")

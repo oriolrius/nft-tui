@@ -313,6 +313,13 @@ class NFTClient:
         cmd = f"chain {family} {table} {name} {{ policy {policy}; }}"
         self._run(["add", cmd])
 
+    async def set_chain_policy_async(
+        self, family: str, table: str, name: str, policy: str
+    ) -> None:
+        """Set chain policy asynchronously."""
+        cmd = f"chain {family} {table} {name} {{ policy {policy}; }}"
+        await self._run_async(["add", cmd])
+
     def add_rule(
         self,
         family: str,
@@ -414,6 +421,27 @@ class NFTClient:
             spec += f'; comment "{comment}"'
         spec += "; }"
         self._run(["add", "set", family, table, name, spec])
+
+    async def add_set_async(
+        self,
+        family: str,
+        table: str,
+        name: str,
+        set_type: str,
+        flags: list[str] | None = None,
+        timeout: int | None = None,
+        comment: str | None = None,
+    ) -> None:
+        """Create a new set asynchronously."""
+        spec = f"{{ type {set_type}"
+        if flags:
+            spec += f"; flags {', '.join(flags)}"
+        if timeout:
+            spec += f"; timeout {timeout}s"
+        if comment:
+            spec += f'; comment "{comment}"'
+        spec += "; }"
+        await self._run_async(["add", "set", family, table, name, spec])
 
     def delete_set(self, family: str, table: str, name: str) -> None:
         """Delete a set."""
