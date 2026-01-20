@@ -11,6 +11,18 @@ from textual.widgets import Button, DataTable, Footer, Header, Input, Select, St
 from ..nft.conntrack import Connection, ConntrackClient, ConntrackError
 
 
+INSTALL_INSTRUCTIONS = """\
+[bold red]conntrack binary not found[/]
+
+Connection tracking requires the [bold]conntrack[/] command-line tool.
+
+[bold]Install on Ubuntu 24.04+:[/]
+  [cyan]sudo apt update && sudo apt install conntrack[/]
+
+Press [bold]Escape[/] or [bold]q[/] to go back.
+"""
+
+
 class ConntrackScreen(Screen):
     """Screen for viewing connection tracking entries."""
 
@@ -29,6 +41,7 @@ class ConntrackScreen(Screen):
         self._connections: list[Connection] = []
         self._filter_protocol: str = ""
         self._filter_state: str = ""
+        self._binary_missing: bool = False
 
     def compose(self) -> ComposeResult:
         """Compose the screen."""
@@ -41,8 +54,15 @@ class ConntrackScreen(Screen):
                 classes="screen-title",
             )
 
+            # Install instructions (hidden by default)
+            yield Static(
+                INSTALL_INSTRUCTIONS,
+                id="install-instructions",
+                classes="install-instructions hidden",
+            )
+
             # Filter controls
-            with Horizontal(classes="filter-row"):
+            with Horizontal(classes="filter-row", id="filter-row"):
                 yield Static("Protocol:", classes="filter-label")
                 yield Select(
                     [
@@ -117,6 +137,14 @@ class ConntrackScreen(Screen):
         """Apply the current filters."""
         self.refresh_connections()
 
+    def _show_install_instructions(self) -> None:
+        """Show install instructions and hide the main UI."""
+        self._binary_missing = True
+        self.query_one("#install-instructions").remove_class("hidden")
+        self.query_one("#filter-row").add_class("hidden")
+        self.query_one("#connection-count").add_class("hidden")
+        self.query_one("#connections-table").add_class("hidden")
+
     @work(exclusive=True)
     async def refresh_connections(self) -> None:
         """Refresh the connection list."""
@@ -124,7 +152,10 @@ class ConntrackScreen(Screen):
             try:
                 self._client = ConntrackClient()
             except ConntrackError as e:
-                self.notify(str(e), severity="error")
+                if "not found" in str(e).lower():
+                    self._show_install_instructions()
+                else:
+                    self.notify(str(e), severity="error")
                 return
 
         try:
@@ -134,7 +165,10 @@ class ConntrackScreen(Screen):
             )
             self.update_table()
         except ConntrackError as e:
-            self.notify(f"Failed to load connections: {e}", severity="error")
+            if "not found" in str(e).lower():
+                self._show_install_instructions()
+            else:
+                self.notify(f"Failed to load connections: {e}", severity="error")
 
     def update_table(self) -> None:
         """Update the connections table."""

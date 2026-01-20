@@ -65,6 +65,11 @@ RulesetTree > .tree--cursor {
     display: none;
 }
 
+/* Generic hidden class */
+.hidden {
+    display: none;
+}
+
 /* Tabbed Content */
 TabbedContent {
     height: 1fr;
@@ -246,6 +251,14 @@ Input {
     text-align: center;
     padding-bottom: 1;
     color: $primary-lighten-2;
+}
+
+.install-instructions {
+    margin: 2 4;
+    padding: 2;
+    border: thick $error;
+    background: $surface-darken-1;
+    height: auto;
 }
 
 .filter-row {
