@@ -22,6 +22,20 @@ Connection tracking requires the [bold]conntrack[/] command-line tool.
 Press [bold]Escape[/] or [bold]q[/] to go back.
 """
 
+PERMISSION_INSTRUCTIONS = """\
+[bold red]Permission denied[/]
+
+Connection tracking requires [bold]root privileges[/] or [bold]CAP_NET_ADMIN[/] capability.
+
+[bold]Run nft-tui with sudo:[/]
+  [cyan]sudo nft-tui[/]
+
+[bold]Or grant capability (not recommended):[/]
+  [cyan]sudo setcap cap_net_admin+ep $(which conntrack)[/]
+
+Press [bold]Escape[/] or [bold]q[/] to go back.
+"""
+
 
 class ConntrackScreen(Screen):
     """Screen for viewing connection tracking entries."""
@@ -137,10 +151,12 @@ class ConntrackScreen(Screen):
         """Apply the current filters."""
         self.refresh_connections()
 
-    def _show_install_instructions(self) -> None:
-        """Show install instructions and hide the main UI."""
+    def _show_error_screen(self, message: str) -> None:
+        """Show error message and hide the main UI."""
         self._binary_missing = True
-        self.query_one("#install-instructions").remove_class("hidden")
+        instructions = self.query_one("#install-instructions", Static)
+        instructions.update(message)
+        instructions.remove_class("hidden")
         self.query_one("#filter-row").add_class("hidden")
         self.query_one("#connection-count").add_class("hidden")
         self.query_one("#connections-table").add_class("hidden")
@@ -152,8 +168,11 @@ class ConntrackScreen(Screen):
             try:
                 self._client = ConntrackClient()
             except ConntrackError as e:
-                if "not found" in str(e).lower():
-                    self._show_install_instructions()
+                error_msg = str(e).lower()
+                if "not found" in error_msg:
+                    self._show_error_screen(INSTALL_INSTRUCTIONS)
+                elif "permission" in error_msg or "operation not permitted" in error_msg:
+                    self._show_error_screen(PERMISSION_INSTRUCTIONS)
                 else:
                     self.notify(str(e), severity="error")
                 return
@@ -165,8 +184,11 @@ class ConntrackScreen(Screen):
             )
             self.update_table()
         except ConntrackError as e:
-            if "not found" in str(e).lower():
-                self._show_install_instructions()
+            error_msg = str(e).lower()
+            if "not found" in error_msg:
+                self._show_error_screen(INSTALL_INSTRUCTIONS)
+            elif "permission" in error_msg or "operation not permitted" in error_msg or "must be root" in error_msg:
+                self._show_error_screen(PERMISSION_INSTRUCTIONS)
             else:
                 self.notify(f"Failed to load connections: {e}", severity="error")
 

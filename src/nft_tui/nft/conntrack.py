@@ -296,10 +296,7 @@ class ConntrackClient:
         if dst:
             args.extend(["-d", dst])
 
-        try:
-            output = self._run(args)
-        except ConntrackError:
-            return []
+        output = self._run(args)
 
         connections = []
         for line in output.splitlines():
@@ -328,10 +325,7 @@ class ConntrackClient:
         if dst:
             args.extend(["-d", dst])
 
-        try:
-            output = await self._run_async(args)
-        except ConntrackError:
-            return []
+        output = await self._run_async(args)
 
         connections = []
         for line in output.splitlines():
